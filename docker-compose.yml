@@ -10,8 +10,14 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
+    volumes:
+      - ping-data:/app/data  # Persistent volume for SQLite database
     networks:
       - cloudflare-tunnel
+
+volumes:
+  ping-data:
+    driver: local
 
 networks:
   cloudflare-tunnel:

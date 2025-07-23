@@ -31,9 +31,16 @@ RUN npm ci --only=production
 COPY --from=builder /app/client/build ./client/build
 COPY server.js ./
 
+# Create data directory for SQLite database
+RUN mkdir -p /app/data
+
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nextjs -u 1001
+
+# Change ownership of data directory
+RUN chown -R nextjs:nodejs /app/data
+
 USER nextjs
 
 # Expose port
