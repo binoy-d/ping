@@ -5,14 +5,30 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Global ping counter
+let pingCount = 0;
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
 // API Routes
 app.get('/api/ping', (req, res) => {
-  console.log('Received ping request');
-  res.json({ message: 'pong' });
+  pingCount++;
+  console.log(`Received ping request #${pingCount}`);
+  res.json({ 
+    message: 'pong',
+    count: pingCount,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Get current ping count without incrementing
+app.get('/api/ping/count', (req, res) => {
+  res.json({ 
+    count: pingCount,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Serve static files from React build (for production)
