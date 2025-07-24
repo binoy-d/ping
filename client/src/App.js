@@ -10,7 +10,7 @@ function App() {
   const [pingCount, setPingCount] = useState(0);
   const [lastPingTime, setLastPingTime] = useState('');
   const [timeFrame, setTimeFrame] = useState(1000); // Start with all-time view
-  const [history, setHistory] = useState({ labels: [], data: [] }); // Pre-processed frequency data
+  const [history, setHistory] = useState({ labels: [], data: [], bucket_type: '' }); // Pre-processed frequency data
 
   // Fetch current ping count on component mount
   useEffect(() => {
@@ -41,14 +41,18 @@ function App() {
       console.log('Frequency data:', data); // Debug log
       // Server now returns pre-processed frequency data
       if (data && Array.isArray(data.labels) && Array.isArray(data.data)) {
-        setHistory({ labels: data.labels, data: data.data });
+        setHistory({ 
+          labels: data.labels, 
+          data: data.data, 
+          bucket_type: data.bucket_type || 'minute' 
+        });
       } else {
         console.warn('Frequency data format unexpected:', data);
-        setHistory({ labels: [], data: [] });
+        setHistory({ labels: [], data: [], bucket_type: '' });
       }
     } catch (error) {
       console.error('Error fetching frequency data:', error);
-      setHistory({ labels: [], data: [] });
+      setHistory({ labels: [], data: [], bucket_type: '' });
     }
   };
 
@@ -104,10 +108,26 @@ function App() {
                     displayColors: false,
                     callbacks: {
                       title: function(context) {
-                        return `Time: ${context[0].label}`;
+                        const bucketType = history.bucket_type;
+                        if (bucketType === '10sec') {
+                          return `10-second interval: ${context[0].label}`;
+                        } else if (bucketType === '30sec') {
+                          return `30-second interval: ${context[0].label}`;
+                        } else {
+                          return `Time: ${context[0].label}`;
+                        }
                       },
                       label: function(context) {
-                        return `Pings: ${context.parsed.y}`;
+                        const value = context.parsed.y;
+                        const bucketType = history.bucket_type;
+                        
+                        if (bucketType === '10sec') {
+                          return value === 1 ? '1 ping in 10 seconds' : `${value} pings in 10 seconds`;
+                        } else if (bucketType === '30sec') {
+                          return value === 1 ? '1 ping in 30 seconds' : `${value} pings in 30 seconds`;
+                        } else {
+                          return value === 1 ? '1 ping' : `${value} pings`;
+                        }
                       }
                     }
                   }

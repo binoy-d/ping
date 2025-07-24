@@ -138,40 +138,109 @@ app.get('/api/ping/count', (req, res) => {
   });
 });
 
-// Get ping frequency data (aggregated by minute for chart)
+// Get ping frequency data (aggregated appropriately for chart)
 app.get('/api/ping/history', (req, res) => {
   const limit = parseInt(req.query.limit) || 100;
   
-  // Calculate frequency per minute from the last N pings
-  db.all(`
-    WITH recent_pings AS (
-      SELECT timestamp
-      FROM pings 
-      ORDER BY timestamp DESC 
-      LIMIT ?
-    )
-    SELECT 
-      strftime('%H:%M', timestamp) as time_label,
-      COUNT(*) as ping_count
-    FROM recent_pings
-    GROUP BY strftime('%Y-%m-%d %H:%M', timestamp)
-    ORDER BY timestamp ASC
-  `, [limit], (err, rows) => {
-    if (err) {
-      console.error('Error getting ping frequency:', err.message);
-      res.status(500).json({ error: 'Database error' });
-    } else {
-      // Format data for chart
-      const labels = rows.map(row => row.time_label);
-      const data = rows.map(row => row.ping_count);
+  if (limit <= 50) {
+    // First, get the time span of recent pings to decide bucket size
+    db.get(`
+      SELECT 
+        MIN(timestamp) as first_ping,
+        MAX(timestamp) as last_ping,
+        (julianday(MAX(timestamp)) - julianday(MIN(timestamp))) * 24 * 60 as time_diff_minutes
+      FROM (
+        SELECT timestamp FROM pings ORDER BY timestamp DESC LIMIT ?
+      )
+    `, [limit], (err, timespan) => {
+      if (err) {
+        console.error('Error getting timespan:', err.message);
+        res.status(500).json({ error: 'Database error' });
+        return;
+      }
       
-      res.json({
-        labels: labels,
-        data: data,
-        total_points: rows.length
+      // Choose bucket size based on time difference
+      let groupBy, timeFormat;
+      if (!timespan || timespan.time_diff_minutes < 5) {
+        // If pings are within 5 minutes, group by 10-second intervals
+        groupBy = "strftime('%Y-%m-%d %H:%M', timestamp) || ':' || printf('%02d', (CAST(strftime('%S', timestamp) AS INTEGER) / 10) * 10)";
+        timeFormat = "strftime('%H:%M', timestamp) || ':' || printf('%02d', (CAST(strftime('%S', timestamp) AS INTEGER) / 10) * 10)";
+      } else if (timespan.time_diff_minutes < 60) {
+        // If pings are within 1 hour, group by 30-second intervals
+        groupBy = "strftime('%Y-%m-%d %H:%M', timestamp) || ':' || printf('%02d', (CAST(strftime('%S', timestamp) AS INTEGER) / 30) * 30)";
+        timeFormat = "strftime('%H:%M', timestamp) || ':' || printf('%02d', (CAST(strftime('%S', timestamp) AS INTEGER) / 30) * 30)";
+      } else {
+        // If pings span more than 1 hour, group by minute
+        groupBy = "strftime('%Y-%m-%d %H:%M', timestamp)";
+        timeFormat = "strftime('%H:%M', timestamp)";
+      }
+      
+      db.all(`
+        WITH recent_pings AS (
+          SELECT timestamp
+          FROM pings 
+          ORDER BY timestamp DESC 
+          LIMIT ?
+        )
+        SELECT 
+          ${timeFormat} as time_label,
+          COUNT(*) as ping_count
+        FROM recent_pings
+        GROUP BY ${groupBy}
+        ORDER BY timestamp ASC
+      `, [limit], (err, rows) => {
+        if (err) {
+          console.error('Error getting ping frequency:', err.message);
+          res.status(500).json({ error: 'Database error' });
+        } else {
+          const labels = rows.map(row => row.time_label);
+          const data = rows.map(row => row.ping_count);
+          
+          res.json({
+            labels: labels,
+            data: data,
+            total_points: rows.length,
+            bucket_type: timespan && timespan.time_diff_minutes < 5 ? '10sec' : 
+                        timespan && timespan.time_diff_minutes < 60 ? '30sec' : 'minute'
+          });
+        }
       });
-    }
-  });
+    });
+  } else {
+    // For larger datasets, aggregate by time periods
+    const groupBy = "strftime('%Y-%m-%d %H:%M', timestamp)";
+    const timeFormat = "strftime('%H:%M', timestamp)";
+    
+    db.all(`
+      WITH recent_pings AS (
+        SELECT timestamp
+        FROM pings 
+        ORDER BY timestamp DESC 
+        LIMIT ?
+      )
+      SELECT 
+        ${timeFormat} as time_label,
+        COUNT(*) as ping_count
+      FROM recent_pings
+      GROUP BY ${groupBy}
+      ORDER BY timestamp ASC
+    `, [limit], (err, rows) => {
+      if (err) {
+        console.error('Error getting ping frequency:', err.message);
+        res.status(500).json({ error: 'Database error' });
+      } else {
+        const labels = rows.map(row => row.time_label);
+        const data = rows.map(row => row.ping_count);
+        
+        res.json({
+          labels: labels,
+          data: data,
+          total_points: rows.length,
+          bucket_type: 'minute'
+        });
+      }
+    });
+  }
 });
 
 // Serve static files from React build (for production)
