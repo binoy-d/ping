@@ -138,23 +138,37 @@ app.get('/api/ping/count', (req, res) => {
   });
 });
 
-// Get ping history (optional endpoint for future use)
+// Get ping frequency data (aggregated by minute for chart)
 app.get('/api/ping/history', (req, res) => {
-  const limit = parseInt(req.query.limit) || 10;
+  const limit = parseInt(req.query.limit) || 100;
   
+  // Calculate frequency per minute from the last N pings
   db.all(`
-    SELECT id, timestamp, ip_address 
-    FROM pings 
-    ORDER BY timestamp DESC 
-    LIMIT ?
+    WITH recent_pings AS (
+      SELECT timestamp
+      FROM pings 
+      ORDER BY timestamp DESC 
+      LIMIT ?
+    )
+    SELECT 
+      strftime('%H:%M', timestamp) as time_label,
+      COUNT(*) as ping_count
+    FROM recent_pings
+    GROUP BY strftime('%Y-%m-%d %H:%M', timestamp)
+    ORDER BY timestamp ASC
   `, [limit], (err, rows) => {
     if (err) {
-      console.error('Error getting ping history:', err.message);
+      console.error('Error getting ping frequency:', err.message);
       res.status(500).json({ error: 'Database error' });
     } else {
+      // Format data for chart
+      const labels = rows.map(row => row.time_label);
+      const data = rows.map(row => row.ping_count);
+      
       res.json({
-        history: rows,
-        count: rows.length
+        labels: labels,
+        data: data,
+        total_points: rows.length
       });
     }
   });

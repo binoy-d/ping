@@ -2,16 +2,15 @@ import React, { useState, useEffect } from 'react';
 import './App.css';
 // Chart.js library for background graph
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, LineElement, CategoryScale, LinearScale, PointElement } from 'chart.js';
-ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement);
+import { Chart as ChartJS, LineElement, CategoryScale, LinearScale, PointElement, Filler } from 'chart.js';
+ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Filler);
 
 function App() {
-  const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
   const [pingCount, setPingCount] = useState(0);
   const [lastPingTime, setLastPingTime] = useState('');
-  const [timeFrame, setTimeFrame] = useState(10);
-  const [history, setHistory] = useState([]);
+  const [timeFrame, setTimeFrame] = useState(1000); // Start with all-time view
+  const [history, setHistory] = useState({ labels: [], data: [] }); // Pre-processed frequency data
 
   // Fetch current ping count on component mount
   useEffect(() => {
@@ -33,13 +32,23 @@ function App() {
     }
   };
 
-  const fetchPingHistory = async () => {
+    const fetchPingHistory = async () => {
     try {
-      const res = await fetch(`/api/ping/history?limit=${timeFrame}`);
+      // For "all time" (1000), send a very large limit
+      const actualLimit = timeFrame >= 1000 ? 9999 : timeFrame;
+      const res = await fetch(`/api/ping/history?limit=${actualLimit}`);
       const data = await res.json();
-      setHistory(data.history.reverse());
+      console.log('Frequency data:', data); // Debug log
+      // Server now returns pre-processed frequency data
+      if (data && Array.isArray(data.labels) && Array.isArray(data.data)) {
+        setHistory({ labels: data.labels, data: data.data });
+      } else {
+        console.warn('Frequency data format unexpected:', data);
+        setHistory({ labels: [], data: [] });
+      }
     } catch (error) {
-      console.error('Error fetching ping history:', error);
+      console.error('Error fetching frequency data:', error);
+      setHistory({ labels: [], data: [] });
     }
   };
 
@@ -48,11 +57,11 @@ function App() {
     try {
       const res = await fetch('/api/ping');
       const data = await res.json();
-      setResponse(data.message);
       setPingCount(data.count);
       setLastPingTime(new Date(data.timestamp).toLocaleString());
+      // Refresh chart data after ping
+      fetchPingHistory();
     } catch (error) {
-      setResponse('Error: Could not reach server');
       console.error('Error:', error);
     }
     setLoading(false);
@@ -60,26 +69,71 @@ function App() {
 
   return (
     <div className="App">
-      {/* Background graph showing recent pings */}
-      <Line
-        className="chart-background"
-        data={{
-          labels: history.map(item => new Date(item.timestamp).toLocaleTimeString()),
-          datasets: [{
-            data: history.map(item => item.id),
-            borderColor: 'rgba(97,218,251,0.2)',
-            backgroundColor: 'rgba(97,218,251,0.05)',
-            fill: true,
-            tension: 0.4,
-          }]
-        }}
-        options={{
-          plugins: { legend: { display: false } },
-          scales: { x: { display: false }, y: { display: false } },
-          elements: { point: { radius: 0 } },
-          maintainAspectRatio: false,
-        }}
-      />
+      <div className="chart-container">
+        {/* Background graph showing recent pings */}
+        {(() => {
+          // Use pre-processed frequency data directly from server
+          const hasData = history.labels && history.labels.length > 0;
+          return (
+            <Line
+              className="chart-background"
+              data={{
+                labels: hasData ? history.labels : [''],
+                datasets: [{
+                  data: hasData ? history.data : [0],
+                  borderColor: 'rgba(97,218,251,0.8)',
+                  backgroundColor: 'rgba(97,218,251,0.2)',
+                  fill: true,
+                  tension: 0.4,
+                  pointRadius: 0,
+                }]
+              }}
+              options={{
+                responsive: true,
+                plugins: { 
+                  legend: { display: false },
+                  tooltip: { 
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(40, 44, 52, 0.9)',
+                    titleColor: '#61dafb',
+                    bodyColor: 'white',
+                    borderColor: '#61dafb',
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                      title: function(context) {
+                        return `Time: ${context[0].label}`;
+                      },
+                      label: function(context) {
+                        return `Pings: ${context.parsed.y}`;
+                      }
+                    }
+                  }
+                },
+                scales: { 
+                  x: { display: false }, 
+                  y: { display: false }
+                },
+                elements: { point: { radius: 0 } },
+                maintainAspectRatio: false,
+                animation: {
+                  duration: 750,
+                  easing: 'easeInOutQuart'
+                },
+                transitions: {
+                  active: {
+                    animation: {
+                      duration: 400
+                    }
+                  }
+                }
+              }}
+            />
+          );
+        })()}
+      </div>
       <header className="App-header">
         <h1>Ping</h1>
         
@@ -92,11 +146,14 @@ function App() {
 
         {/* Timeframe selector */}
         <div className="timeframe-selector">
-          <label htmlFor="timeframe">Last </label>
+          <label htmlFor="timeframe">Chart shows </label>
           <select id="timeframe" value={timeFrame} onChange={e => setTimeFrame(Number(e.target.value))}>
-            {[5,10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+            <option value={1000}>All time activity</option>
+            <option value={200}>Last 200 pings</option>
+            <option value={100}>Last 100 pings</option>
+            <option value={50}>Last 50 pings</option>
+            <option value={20}>Last 20 pings</option>
           </select>
-          <label> pings</label>
         </div>
 
         <div className="ping-container">
@@ -108,13 +165,9 @@ function App() {
             {loading ? 'Pinging...' : 'Ping'}
           </button>
           
-          {response && (
-            <div className="response">
-              <h2>Server Response:</h2>
-              <p className="response-text">{response}</p>
-              {lastPingTime && (
-                <p className="timestamp">Last ping: {lastPingTime}</p>
-              )}
+          {lastPingTime && (
+            <div className="last-ping-time">
+              Last ping: {lastPingTime}
             </div>
           )}
         </div>
